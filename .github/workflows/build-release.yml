@@ -56,6 +56,9 @@ jobs:
         if: steps.check.outputs.build_needed == 'true'
         working-directory: src
         run: |
+          # Cherry-pick 需要提交者身份，Runner 环境默认未配置
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           TIP="$(git rev-parse FETCH_HEAD)"
           C1="$(git rev-parse "${TIP}~2")"
           C2="$(git rev-parse "${TIP}~1")"
