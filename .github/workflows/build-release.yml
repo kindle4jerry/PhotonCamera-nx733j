@@ -1,0 +1,149 @@
+name: Build NX733J Variable Aperture Release
+
+on:
+  schedule:
+    # 每天 UTC 16:30（北京时间次日 00:30）检查一次
+    - cron: '30 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nx733j-release-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout automation repository
+        uses: actions/checkout@v4
+
+      - name: Query latest upstream release tag
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$(gh api repos/bjzhou/PhotonCamera/releases/latest --jq '.tag_name')"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "Latest upstream release tag: ${TAG}"
+
+      - name: Compare with last built version
+        id: check
+        run: |
+          LAST="$(cat last-built-release.txt 2>/dev/null || true)"
+          echo "last_built=${LAST}"
+          if [ "${LAST}" = "${{ steps.upstream.outputs.tag }}" ]; then
+            echo "build_needed=false" >> "${GITHUB_OUTPUT}"
+            echo "Upstream release ${{ steps.upstream.outputs.tag }} was already built; skipping."
+          else
+            echo "build_needed=true" >> "${GITHUB_OUTPUT}"
+            echo "New upstream release ${{ steps.upstream.outputs.tag }} detected (last built: ${LAST:-none}); building."
+          fi
+
+      - name: Clone upstream source at release tag
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          git clone --depth 1 --branch "${{ steps.upstream.outputs.tag }}" \
+            https://github.com/bjzhou/PhotonCamera.git src
+          # 拉取 NX733J 适配分支（可变光圈 3 个提交位于该分支顶端）
+          git -C src fetch --no-tags \
+            https://github.com/kindle4jerry/PhotonCamera.git main-nx733j
+
+      - name: Cherry-pick NX733J variable aperture commits
+        if: steps.check.outputs.build_needed == 'true'
+        working-directory: src
+        run: |
+          TIP="$(git rev-parse FETCH_HEAD)"
+          C1="$(git rev-parse "${TIP}~2")"
+          C2="$(git rev-parse "${TIP}~1")"
+          C3="${TIP}"
+          echo "Cherry-picking the latest 3 commits of kindle4jerry/PhotonCamera:main-nx733j:"
+          git log --oneline -3 "${C1}"
+          # -X theirs：冲突时采用 NX733J 适配提交一侧，保证无人值守下可自动完成；
+          # 若冲突涉及文件增删导致无法自动解决，构建步骤会失败并在日志中明确暴露。
+          git cherry-pick -X theirs "${C1}" "${C2}" "${C3}"
+          git log --oneline -6
+
+      - name: Set up JDK 17
+        if: steps.check.outputs.build_needed == 'true'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        if: steps.check.outputs.build_needed == 'true'
+        working-directory: src
+        run: chmod +x gradlew
+
+      - name: Create local.properties
+        if: steps.check.outputs.build_needed == 'true'
+        working-directory: src
+        env:
+          BUILT_IN_API_KEY: ${{ secrets.BUILT_IN_API_KEY }}
+          BUILT_IN_API_KEY_GOOGLE: ${{ secrets.BUILT_IN_API_KEY_GOOGLE }}
+        run: |
+          {
+            printf 'BUILT_IN_API_KEY=%s\n' "$BUILT_IN_API_KEY"
+            printf 'BUILT_IN_API_KEY_GOOGLE=%s\n' "$BUILT_IN_API_KEY_GOOGLE"
+          } > local.properties
+
+      - name: Decode release keystore
+        if: steps.check.outputs.build_needed == 'true'
+        working-directory: src
+        run: echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > app/release.keystore
+
+      - name: Build release APK (default flavor, com.hinnka.mycamera.nx733j)
+        if: steps.check.outputs.build_needed == 'true'
+        working-directory: src
+        run: |
+          ./gradlew assembleDefaultRelease \
+            -PRELEASE_STORE_FILE=release.keystore \
+            -PRELEASE_STORE_PASSWORD="${{ secrets.RELEASE_STORE_PASSWORD }}" \
+            -PRELEASE_KEY_ALIAS="${{ secrets.RELEASE_KEY_ALIAS }}" \
+            -PRELEASE_KEY_PASSWORD="${{ secrets.RELEASE_KEY_PASSWORD }}"
+
+      - name: Remove stale release with same tag
+        if: steps.check.outputs.build_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="nx733j-${{ steps.upstream.outputs.tag }}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Deleting existing release ${TAG} before recreating"
+            gh release delete "${TAG}" --cleanup-tag --yes
+          fi
+
+      - name: Publish APK as GitHub release
+        if: steps.check.outputs.build_needed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nx733j-${{ steps.upstream.outputs.tag }}
+          name: NX733J Variable Aperture ${{ steps.upstream.outputs.tag }}
+          body: |
+            基于上游 [bjzhou/PhotonCamera](https://github.com/bjzhou/PhotonCamera) release **${{ steps.upstream.outputs.tag }}** 的源码，
+            叠加 [kindle4jerry/PhotonCamera](https://github.com/kindle4jerry/PhotonCamera) `main-nx733j` 分支最新 3 个提交
+            （物理可变光圈适配、包名 `com.hinnka.mycamera.nx733j`、EXIF 光圈值跟随档位）自动构建。
+
+            - 包名：`com.hinnka.mycamera.nx733j`（与官方包不冲突）
+            - 自动构建时间：${{ github.event.schedule && '定时任务' || '手动触发' }}
+          files: src/app/build/outputs/apk/default/release/*.apk
+          make_latest: true
+
+      - name: Record built release version
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          echo "${{ steps.upstream.outputs.tag }}" > last-built-release.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add last-built-release.txt
+          if git diff --cached --quiet; then
+            echo "No marker change to commit."
+          else
+            git commit -m "build: record built upstream release ${{ steps.upstream.outputs.tag }}"
+            git push
+          fi

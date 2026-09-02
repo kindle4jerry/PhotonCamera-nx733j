@@ -1,0 +1,6 @@
+# 本地调试拉取的源码目录（不提交）
+src/
+*.apk
+*.jks
+*.keystore
+.DS_Store
