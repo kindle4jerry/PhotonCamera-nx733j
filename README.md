@@ -1,6 +1,6 @@
 # PhotonCamera-nx733j 自动构建
 
-本仓库**不存放相机源码**，只负责自动化：每天检查上游 [bjzhou/PhotonCamera](https://github.com/bjzhou/PhotonCamera) 的最新 release，一旦出现新版本，拉取该 tag 的源码，cherry-pick [kindle4jerry/PhotonCamera](https://github.com/kindle4jerry/PhotonCamera) `main-nx733j` 分支**最新 3 个提交**（NX733J 物理可变光圈适配），编译并发布带可变光圈的 release APK。
+本仓库**不存放相机源码**，只负责自动化：每天检查上游 [bjzhou/PhotonCamera](https://github.com/bjzhou/PhotonCamera) 的最新 release，一旦出现新版本，就用 NX733J 适配分支（[kindle4jerry/PhotonCamera](https://github.com/kindle4jerry/PhotonCamera) 的物理可变光圈适配）编译并发布 release APK。
 
 ## 工作原理
 
@@ -14,13 +14,14 @@
 git clone --depth 1 --branch <tag> https://github.com/bjzhou/PhotonCamera.git src
         │
         ▼
-git fetch https://github.com/kindle4jerry/PhotonCamera.git main-nx733j
+列出所有 main-nx733j-<版本> 适配分支，取版本号最新者作为适配提交来源
+（一个都没有时回退到 main-nx733j）
         │
         ▼
-cherry-pick main-nx733j 最新 3 个提交（-X theirs 自动解决冲突）
-  · 2a36d78b feat: variable aperture（物理可变光圈，F 按钮 + 9 档标尺）
-  · a5b18dbc chore: default flavor package name to com.hinnka.mycamera.nx733j
-  · e7ef81a3 fix: exif aperture follows variable aperture level
+cherry-pick 该来源分支顶端 3 个提交（-X theirs 自动解决冲突）
+  · feat: variable aperture（F 按钮 + 9 档标尺）
+  · chore: default flavor package name → com.hinnka.mycamera.nx733j
+  · fix: exif aperture follows variable aperture level
         │
         ▼
 ./gradlew assembleDefaultRelease（R8 混淆 + 资源压缩 + 签名）
@@ -31,6 +32,9 @@ cherry-pick main-nx733j 最新 3 个提交（-X theirs 自动解决冲突）
         ▼
 更新 last-built-release.txt 并提交（下次定时任务据此跳过已构建版本）
 ```
+
+> 适配提交来源取**版本最新的适配分支**（如 `main-nx733j-1.28.0.1`），因为它的基线离当前上游最近、cherry-pick 漂移最小；
+> 构建目标始终是**上游最新 tag**，因此产物 = 最新上游源码 + 最新可变光圈适配。
 
 ## 首次配置（只需一次）
 
@@ -54,12 +58,14 @@ cherry-pick main-nx733j 最新 3 个提交（-X theirs 自动解决冲突）
 - **GitHub Release**：tag `nx733j-<上游tag>`，附件 `app-default-release.apk`（包名 `com.hinnka.mycamera.nx733j`）；
 - **`last-built-release.txt`**：记录已构建的上游 release tag（由 workflow 自动提交），作为每日检查的跳过依据。
 
-## 维护 main-nx733j 适配提交
+## 维护适配分支
 
-上游每次发布新版本后，需要把 3 个适配提交重新 rebase/cherry-pick 到 `kindle4jerry/PhotonCamera` 的 `main-nx733j` 分支顶端（参考上一版的手动流程）。本 workflow **永远取该分支最新的 3 个提交**，因此：
+适配提交来源 = 所有 `main-nx733j-<版本>` 分支中**版本号最新**的那个（无则回退 `main-nx733j`）。因此维护约定是：
 
-- `main-nx733j` 分支顶端 3 个提交必须始终是：可变光圈 feat、包名 chore、EXIF fix；
-- 冲突时 workflow 使用 `-X theirs` 以适配提交为准自动解决；若出现无法自动解决的冲突（如文件增删）或编译失败，Action 会失败并在日志中暴露，届时人工处理并更新 `main-nx733j` 后重新触发。
+- 上游发布新版本后，若 Action 自动 cherry-pick 后编译失败（上游重构导致，如 1.28.0 重写了 `ParameterRuler`/`CameraParameterBar`），
+  就以该 tag 为基线创建/更新适配分支 `main-nx733j-<tag>`，在其上解决冲突并验证编译，然后推送；
+- 该分支顶端 3 个提交必须始终是：可变光圈 feat、包名 chore、EXIF fix（workflow 取 tip-3）；
+- 平时小版本更新无需人工介入：workflow 会自动用最新适配分支的 3 个提交合并到最新上游 tag。
 
 ## 常见问题
 

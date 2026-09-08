@@ -48,27 +48,44 @@ jobs:
         run: |
           git clone --depth 1 --branch "${{ steps.upstream.outputs.tag }}" \
             https://github.com/bjzhou/PhotonCamera.git src
-          # 拉取 NX733J 适配分支（可变光圈 3 个提交位于该分支顶端）
-          git -C src fetch --no-tags \
-            https://github.com/kindle4jerry/PhotonCamera.git main-nx733j
 
-      - name: Cherry-pick NX733J variable aperture commits
+      - name: Resolve NX733J adaptation
         if: steps.check.outputs.build_needed == 'true'
+        id: adapt
         working-directory: src
+        env:
+          ADAPT_REPO: https://github.com/kindle4jerry/PhotonCamera.git
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
         run: |
           # Cherry-pick 需要提交者身份，Runner 环境默认未配置
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 适配提交来源：所有 main-nx733j-<版本> 适配分支中取版本号最新者
+          # （其基线离当前上游最近，cherry-pick 漂移最小）；一个都没有时回退到 main-nx733j。
+          VERSIONED_BRANCHES="$(git ls-remote --heads "${ADAPT_REPO}" 'refs/heads/main-nx733j-*' \
+            | sed 's#.*refs/heads/##' \
+            | grep -E '^main-nx733j-[0-9][0-9.]*$' || true)"
+          echo "Versioned adaptation branches found:"
+          printf '%s\n' "${VERSIONED_BRANCHES:-<none>}"
+
+          if [ -n "${VERSIONED_BRANCHES}" ]; then
+            SOURCE_BRANCH="$(printf '%s\n' "${VERSIONED_BRANCHES}" | sort -V | tail -n1)"
+          else
+            SOURCE_BRANCH="main-nx733j"
+          fi
+          echo "source_branch=${SOURCE_BRANCH}" >> "${GITHUB_OUTPUT}"
+          echo "Using adaptation commits from: ${SOURCE_BRANCH}"
+
+          git fetch --no-tags "${ADAPT_REPO}" "${SOURCE_BRANCH}"
           TIP="$(git rev-parse FETCH_HEAD)"
-          C1="$(git rev-parse "${TIP}~2")"
-          C2="$(git rev-parse "${TIP}~1")"
-          C3="${TIP}"
-          echo "Cherry-picking the latest 3 commits of kindle4jerry/PhotonCamera:main-nx733j:"
-          git log --oneline -3 "${C1}"
+          echo "Cherry-picking the latest 3 commits of ${SOURCE_BRANCH} onto upstream ${UPSTREAM_TAG}:"
+          git log --oneline -3 "$(git rev-parse "${TIP}~2")"
           # -X theirs：冲突时采用 NX733J 适配提交一侧，保证无人值守下可自动完成；
-          # 若冲突涉及文件增删导致无法自动解决，构建步骤会失败并在日志中明确暴露。
-          git cherry-pick -X theirs "${C1}" "${C2}" "${C3}"
-          git log --oneline -6
+          # 若上游大重构导致合并后编译失败，构建步骤会失败并在日志中明确暴露，
+          # 此时应针对该上游版本创建/更新 main-nx733j-<tag> 适配分支后重新运行。
+          git cherry-pick -X theirs "${TIP}~2" "${TIP}~1" "${TIP}"
+          git log --oneline -5
 
       - name: Set up JDK 17
         if: steps.check.outputs.build_needed == 'true'
