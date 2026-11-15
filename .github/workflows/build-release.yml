@@ -81,6 +81,14 @@ jobs:
           TIP="$(git rev-parse FETCH_HEAD)"
           echo "Cherry-picking the latest 3 commits of ${SOURCE_BRANCH} onto upstream ${UPSTREAM_TAG}:"
           git log --oneline -3 "$(git rev-parse "${TIP}~2")"
+
+          # 记录来源分支顶端 3 个提交（原始 SHA + 标题），供 release note 直接引用，
+          # 避免 note 里写死分支名/提交说明与实际构建内容脱节。
+          {
+            echo 'source_commits<<__COMMITS_EOF__'
+            git log --pretty='- `%h` %s' -3 "${TIP}"
+            echo '__COMMITS_EOF__'
+          } >> "${GITHUB_OUTPUT}"
           # -X theirs：冲突时采用 NX733J 适配提交一侧，保证无人值守下可自动完成；
           # 若上游大重构导致合并后编译失败，构建步骤会失败并在日志中明确暴露，
           # 此时应针对该上游版本创建/更新 main-nx733j-<tag> 适配分支后重新运行。
@@ -146,8 +154,9 @@ jobs:
           name: NX733J Variable Aperture ${{ steps.upstream.outputs.tag }}
           body: |
             基于上游 [bjzhou/PhotonCamera](https://github.com/bjzhou/PhotonCamera) release **${{ steps.upstream.outputs.tag }}** 的源码，
-            叠加 [kindle4jerry/PhotonCamera](https://github.com/kindle4jerry/PhotonCamera) `main-nx733j` 分支最新 3 个提交
-            （物理可变光圈适配、包名 `com.hinnka.mycamera.nx733j`、EXIF 光圈值跟随档位）自动构建。
+            叠加 [kindle4jerry/PhotonCamera](https://github.com/kindle4jerry/PhotonCamera) 的 `${{ steps.adapt.outputs.source_branch }}` 分支顶端 3 个提交自动构建：
+
+            ${{ steps.adapt.outputs.source_commits }}
 
             - 包名：`com.hinnka.mycamera.nx733j`（与官方包不冲突）
             - 自动构建时间：${{ github.event.schedule && '定时任务' || '手动触发' }}

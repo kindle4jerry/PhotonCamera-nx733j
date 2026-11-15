@@ -33,7 +33,7 @@ cherry-pick 该来源分支顶端 3 个提交（-X theirs 自动解决冲突）
 更新 last-built-release.txt 并提交（下次定时任务据此跳过已构建版本）
 ```
 
-> 适配提交来源取**版本最新的适配分支**（如 `main-nx733j-1.28.0.1`），因为它的基线离当前上游最近、cherry-pick 漂移最小；
+> 适配提交来源取**版本最新的适配分支**（如 `main-nx733j-1.28.7`），因为它的基线离当前上游最近、cherry-pick 漂移最小；
 > 构建目标始终是**上游最新 tag**，因此产物 = 最新上游源码 + 最新可变光圈适配。
 
 ## 首次配置（只需一次）
@@ -56,6 +56,8 @@ cherry-pick 该来源分支顶端 3 个提交（-X theirs 自动解决冲突）
 ## 输出
 
 - **GitHub Release**：tag `nx733j-<上游tag>`，附件 `app-default-release.apk`（包名 `com.hinnka.mycamera.nx733j`）；
+  release note 里的**适配分支名**和**实际 cherry-pick 的 3 个提交**均由 workflow 按本次解析结果注入
+  （`steps.adapt.outputs.source_branch` / `source_commits`）；
 - **`last-built-release.txt`**：记录已构建的上游 release tag（由 workflow 自动提交），作为每日检查的跳过依据。
 
 ## 维护适配分支
@@ -66,6 +68,7 @@ cherry-pick 该来源分支顶端 3 个提交（-X theirs 自动解决冲突）
   就以该 tag 为基线创建/更新适配分支 `main-nx733j-<tag>`，在其上解决冲突并验证编译，然后推送；
 - 该分支顶端 3 个提交必须始终是：可变光圈 feat、包名 chore、EXIF fix（workflow 取 tip-3）；
 - 平时小版本更新无需人工介入：workflow 会自动用最新适配分支的 3 个提交合并到最新上游 tag。
+- TODO 按照作者进行筛选顶端若干提交
 
 ## 常见问题
 
