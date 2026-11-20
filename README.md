@@ -18,10 +18,10 @@ git clone --depth 1 --branch <tag> https://github.com/bjzhou/PhotonCamera.git sr
 （一个都没有时回退到 main-nx733j）
         │
         ▼
-cherry-pick 该来源分支顶端 3 个提交（-X theirs 自动解决冲突）
-  · feat: variable aperture（F 按钮 + 9 档标尺）
-  · chore: default flavor package name → com.hinnka.mycamera.nx733j
-  · fix: exif aperture follows variable aperture level
+cherry-pick 该来源分支顶端 X 个提交（-X theirs 自动解决冲突）
+  · X 按作者自动统计：自 tip 起连续以 kindle4jerry 为作者的提交有几个就取几个
+  · 目前即 3 个：feat 可变光圈（F 按钮 + 9 档标尺）、
+    chore 包名 → com.hinnka.mycamera.nx733j、fix EXIF 光圈；以后追加提交自动纳入
         │
         ▼
 ./gradlew assembleDefaultRelease（R8 混淆 + 资源压缩 + 签名）
@@ -56,8 +56,8 @@ cherry-pick 该来源分支顶端 3 个提交（-X theirs 自动解决冲突）
 ## 输出
 
 - **GitHub Release**：tag `nx733j-<上游tag>`，附件 `app-default-release.apk`（包名 `com.hinnka.mycamera.nx733j`）；
-  release note 里的**适配分支名**和**实际 cherry-pick 的 3 个提交**均由 workflow 按本次解析结果注入
-  （`steps.adapt.outputs.source_branch` / `source_commits`）；
+  release note 里的**适配分支名**、**顶端提交个数**与**实际 cherry-pick 的提交列表**均由 workflow 按本次解析结果注入
+  （`steps.adapt.outputs.source_branch` / `pick_count` / `source_commits`）；
 - **`last-built-release.txt`**：记录已构建的上游 release tag（由 workflow 自动提交），作为每日检查的跳过依据。
 
 ## 维护适配分支
@@ -66,12 +66,16 @@ cherry-pick 该来源分支顶端 3 个提交（-X theirs 自动解决冲突）
 
 - 上游发布新版本后，若 Action 自动 cherry-pick 后编译失败（上游重构导致，如 1.28.0 重写了 `ParameterRuler`/`CameraParameterBar`），
   就以该 tag 为基线创建/更新适配分支 `main-nx733j-<tag>`，在其上解决冲突并验证编译，然后推送；
-- 该分支顶端 3 个提交必须始终是：可变光圈 feat、包名 chore、EXIF fix（workflow 取 tip-3）；
-- 平时小版本更新无需人工介入：workflow 会自动用最新适配分支的 3 个提交合并到最新上游 tag。
-- TODO 按照作者进行筛选顶端若干提交
+- 适配提交范围按**作者**自动识别：X = 自 tip 起连续以 kindle4jerry 为作者（姓名或邮箱含 kindle4jerry）的提交个数，
+  数到第一个非 kindle4jerry 提交（如 rebase 到新基线后的上游提交）即止——所以请让 kindle4jerry 的提交
+  保持在分支顶端连续排列（目前为 3 个：可变光圈 feat、包名 chore、EXIF fix）；
+- 在顶端追加 kindle4jerry 的新提交（新增适配/修复）无需再改 workflow，下次构建会自动把它们一并 cherry-pick；
+- 平时小版本更新无需人工介入：workflow 会自动把最新适配分支顶端全部 kindle4jerry 提交合并到最新上游 tag。
 
 ## 常见问题
 
 - **上游没更新，每天的任务白跑吗？** 不会构建，job 在版本比对步骤直接跳过（几十秒结束）。
 - **如何强制重建当前版本？** 手动 Run workflow（会先删除同名旧 release 再重建）。
-- **构建失败怎么看？** Actions 日志按步骤输出：cherry-pick 的三个提交、冲突状态、Gradle 编译错误都会明确显示。
+- **构建失败怎么看？** Actions 日志按步骤输出：识别出的顶端提交个数、cherry-pick 的提交、冲突状态、Gradle 编译错误都会明确显示。
+- **为什么报“顶端没有 kindle4jerry 提交”？** 所选适配分支 tip 不是 kindle4jerry 的提交（比如 rebase 后把上游提交留在了顶端），
+  把 kindle4jerry 的适配提交挪回分支顶端即可。

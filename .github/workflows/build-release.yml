@@ -79,20 +79,43 @@ jobs:
 
           git fetch --no-tags "${ADAPT_REPO}" "${SOURCE_BRANCH}"
           TIP="$(git rev-parse FETCH_HEAD)"
-          echo "Cherry-picking the latest 3 commits of ${SOURCE_BRANCH} onto upstream ${UPSTREAM_TAG}:"
-          git log --oneline -3 "$(git rev-parse "${TIP}~2")"
 
-          # 记录来源分支顶端 3 个提交（原始 SHA + 标题），供 release note 直接引用，
+          # 适配提交个数 X 不再固定为 3，而是按作者动态判定：
+          # 自 tip 沿第一亲链向下数，连续以 kindle4jerry 为作者（姓名或邮箱含 kindle4jerry，
+          # 忽略大小写）的提交有几个，X 就是几；数到第一个非 kindle4jerry 提交（例如
+          # rebase 到新基线后的上游提交）即止。今后在分支顶端追加 kindle4jerry 的新提交
+          # 会自动纳入 cherry-pick 范围，无需再改本 workflow。
+          X="$(git log --first-parent --format='%an <%ae>' "${TIP}" \
+            | awk 'tolower($0) !~ /kindle4jerry/ {exit} {n++} END{print n+0}')"
+          echo "Detected ${X} consecutive kindle4jerry-authored commit(s) at the tip of ${SOURCE_BRANCH}."
+
+          if [ "${X}" -lt 1 ]; then
+            echo "::error::${SOURCE_BRANCH} 顶端没有作者为 kindle4jerry 的提交，无法确定适配提交范围；请检查适配分支。" >&2
+            exit 1
+          fi
+          echo "pick_count=${X}" >> "${GITHUB_OUTPUT}"
+
+          echo "Cherry-picking the ${X} commit(s) at the tip of ${SOURCE_BRANCH} onto upstream ${UPSTREAM_TAG}:"
+          git log --oneline -"${X}" "${TIP}"
+
+          # 记录来源分支顶端 X 个提交（原始 SHA + 标题），供 release note 直接引用，
           # 避免 note 里写死分支名/提交说明与实际构建内容脱节。
           {
             echo 'source_commits<<__COMMITS_EOF__'
-            git log --pretty='- `%h` %s' -3 "${TIP}"
+            git log --pretty='- `%h` %s' -"${X}" "${TIP}"
             echo '__COMMITS_EOF__'
           } >> "${GITHUB_OUTPUT}"
           # -X theirs：冲突时采用 NX733J 适配提交一侧，保证无人值守下可自动完成；
           # 若上游大重构导致合并后编译失败，构建步骤会失败并在日志中明确暴露，
           # 此时应针对该上游版本创建/更新 main-nx733j-<tag> 适配分支后重新运行。
-          git cherry-pick -X theirs "${TIP}~2" "${TIP}~1" "${TIP}"
+          # 按从旧到新的顺序 cherry-pick 顶端 X 个提交（X=3 时等价于原来的 ~2 ~1 tip）。
+          PICK_REVS=()
+          i=$((X-1))
+          while [ "${i}" -ge 0 ]; do
+            PICK_REVS+=("${TIP}~${i}")
+            i=$((i-1))
+          done
+          git cherry-pick -X theirs "${PICK_REVS[@]}"
           git log --oneline -5
 
       - name: Set up JDK 17
@@ -154,7 +177,7 @@ jobs:
           name: NX733J Variable Aperture ${{ steps.upstream.outputs.tag }}
           body: |
             基于上游 [bjzhou/PhotonCamera](https://github.com/bjzhou/PhotonCamera) release **${{ steps.upstream.outputs.tag }}** 的源码，
-            叠加 [kindle4jerry/PhotonCamera](https://github.com/kindle4jerry/PhotonCamera) 的 `${{ steps.adapt.outputs.source_branch }}` 分支顶端 3 个提交自动构建：
+            叠加 [kindle4jerry/PhotonCamera](https://github.com/kindle4jerry/PhotonCamera) 的 `${{ steps.adapt.outputs.source_branch }}` 分支顶端 ${{ steps.adapt.outputs.pick_count }} 个提交（自 tip 起连续的 kindle4jerry 提交）自动构建：
 
             ${{ steps.adapt.outputs.source_commits }}
 
